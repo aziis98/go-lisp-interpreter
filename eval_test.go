@@ -50,6 +50,19 @@ func ExampleInterpreter_Eval_quote2() {
 	// #(+ 1 2 3)
 }
 
+func ExampleInterpreter_Eval_quasiquote() {
+	interp := lisp.NewInterpreter()
+	v, err := interp.Eval(`#(a b 1.0 [3 $(+ 3 1) 5] $(+ 1 2 3))`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(lisp.Show(v))
+
+	// Output:
+	// #(a b 1 [3 4 5] 6)
+}
+
 func ExampleInterpreter_Execute_list() {
 	interp := lisp.NewInterpreter()
 	err := interp.Execute(`

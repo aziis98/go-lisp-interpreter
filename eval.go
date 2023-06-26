@@ -67,7 +67,7 @@ func (i *Interpreter) Eval(program string) (any, error) {
 		return nil, err
 	}
 
-	return i.evaluateNode(i.Root, ast)
+	return i.evalExpression(i.Root, ast)
 }
 
 func (i *Interpreter) Execute(program string) error {
@@ -82,14 +82,77 @@ func (i *Interpreter) Execute(program string) error {
 		return err
 	}
 
-	if _, err := i.evaluateNode(i.Root, ast); err != nil {
+	if _, err := i.evalExpression(i.Root, ast); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) {
+func (interp *Interpreter) evalQuasiquote(scope *Scope, v any) (any, error) {
+	switch v := v.(type) {
+	case Apply:
+		args := make([]any, len(v.Values))
+
+		for i, v := range v.Values {
+			item, err := interp.evalQuasiquote(scope, v)
+			if err != nil {
+				return nil, err
+			}
+
+			args[i] = item
+		}
+
+		return Apply{args}, nil
+
+	case List:
+		items := make([]any, len(v.Values))
+
+		for i, v := range v.Values {
+			item, err := interp.evalQuasiquote(scope, v)
+			if err != nil {
+				return nil, err
+			}
+
+			items[i] = item
+		}
+
+		return List{items}, nil
+
+	case Drill:
+		target, err := interp.evalQuasiquote(scope, v.Chain[0])
+		if err != nil {
+			return nil, err
+		}
+
+		chain := []any{target}
+		chain = append(chain, v.Chain[1:]...)
+
+		return Drill{chain}, nil
+	case Map:
+
+		entries := make([]any, len(v.Entries))
+
+		for i, v := range v.Entries {
+			item, err := interp.evalQuasiquote(scope, v)
+			if err != nil {
+				return nil, err
+			}
+
+			entries[i] = item
+		}
+
+		return List{entries}, nil
+
+	case Unquote:
+		return interp.evalExpression(scope, v.Value)
+
+	default:
+		return v, nil
+	}
+}
+
+func (interp *Interpreter) evalExpression(scope *Scope, v any) (r any, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			r = nil
@@ -98,6 +161,15 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 	}()
 
 	switch v := v.(type) {
+
+	case Quote:
+		q, err := interp.evalQuasiquote(scope, v.Value)
+		if err != nil {
+			return nil, err
+		}
+
+		return Quote{q}, nil
+
 	case Apply:
 		if len(v.Values) == 0 { // () is nil
 			return nil, nil
@@ -112,7 +184,7 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 				var result any
 				for _, stmt := range args {
 					var err error
-					if result, err = interp.evaluateNode(scope, stmt); err != nil {
+					if result, err = interp.evalExpression(scope, stmt); err != nil {
 						return nil, err
 					}
 				}
@@ -120,7 +192,7 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 			case "+": // (+ ...)
 				var total int64
 				for _, arg := range args {
-					value, err := interp.evaluateNode(scope, arg)
+					value, err := interp.evalExpression(scope, arg)
 					if err != nil {
 						return nil, err
 					}
@@ -132,7 +204,7 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 			case "set!":
 				variable := args[0].(Symbol).Name
 
-				value, err := interp.evaluateNode(scope, args[1])
+				value, err := interp.evalExpression(scope, args[1])
 				if err != nil {
 					return nil, err
 				}
@@ -142,14 +214,14 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 			}
 		}
 
-		evaluatedCallee, err := interp.evaluateNode(scope, callee)
+		evaluatedCallee, err := interp.evalExpression(scope, callee)
 		if err != nil {
 			return nil, err
 		}
 
 		rArgs := make([]reflect.Value, len(args))
 		for i, arg := range args {
-			evaluatedArg, err := interp.evaluateNode(scope, arg)
+			evaluatedArg, err := interp.evalExpression(scope, arg)
 			if err != nil {
 				return nil, err
 			}
@@ -189,7 +261,7 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 	case List:
 		items := make([]any, len(v.Values))
 		for i, item := range v.Values {
-			eItem, err := interp.evaluateNode(scope, item)
+			eItem, err := interp.evalExpression(scope, item)
 			if err != nil {
 				return nil, err
 			}
@@ -204,11 +276,11 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 		for i, entry := range v.Entries {
 			k, v := entry.Values[0], entry.Values[1]
 
-			eKey, err := interp.evaluateNode(scope, k)
+			eKey, err := interp.evalExpression(scope, k)
 			if err != nil {
 				return nil, err
 			}
-			eValue, err := interp.evaluateNode(scope, v)
+			eValue, err := interp.evalExpression(scope, v)
 			if err != nil {
 				return nil, err
 			}
@@ -219,7 +291,7 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 		return Map{items}, nil
 
 	case Drill:
-		value, err := interp.evaluateNode(scope, v.Chain[0])
+		value, err := interp.evalExpression(scope, v.Chain[0])
 		if err != nil {
 			return nil, err
 		}
