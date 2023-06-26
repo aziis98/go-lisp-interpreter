@@ -48,7 +48,8 @@ func NewInterpreter() *Interpreter {
 				"int":   func(v any) int { return int(reflect.ValueOf(v).Int()) },
 
 				"quote": func(item any) any { return Quote{item} },
-				"list":  func(items ...any) any { return List{items} },
+
+				"symbol": func(s any) any { return Symbol{s.(string)} },
 			},
 		},
 	}
@@ -69,6 +70,25 @@ func (i *Interpreter) Eval(program string) (any, error) {
 	return i.evaluateNode(i.Root, ast)
 }
 
+func (i *Interpreter) Execute(program string) error {
+	tokens, err := Tokenize(program)
+	if err != nil {
+		return err
+	}
+
+	p := &parser{tokens: tokens, cursor: 0}
+	ast, err := p.parseProgram()
+	if err != nil {
+		return err
+	}
+
+	if _, err := i.evaluateNode(i.Root, ast); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -78,7 +98,7 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 	}()
 
 	switch v := v.(type) {
-	case List:
+	case Apply:
 		if len(v.Values) == 0 { // () is nil
 			return nil, nil
 		}
@@ -97,39 +117,6 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 					}
 				}
 				return result, nil
-			case "get": // (get <value> <keys...>)
-				value, err := interp.evaluateNode(scope, args[0])
-				if err != nil {
-					return nil, err
-				}
-
-				keys := args[1:]
-				for _, key := range keys {
-					if l, ok := value.(List); ok {
-						value = l.Values
-					}
-
-					switch k := key.(type) {
-					case Symbol:
-						val := reflect.ValueOf(value)
-						switch val.Kind() {
-						case reflect.Struct:
-							value = val.FieldByName(k.Name).Interface()
-						case reflect.Map:
-							value = val.MapIndex(reflect.ValueOf(k.Name)).Interface()
-						default:
-							return nil, fmt.Errorf(`cannot get "%s" from %v`, k.Name, value)
-						}
-					case string:
-						value = reflect.ValueOf(value).MapIndex(reflect.ValueOf(k)).Interface()
-					case int64:
-						value = reflect.ValueOf(value).Index(int(k)).Interface()
-					default:
-						return nil, fmt.Errorf(`cannot get %#v from %v`, key, value)
-					}
-				}
-
-				return value, nil
 			case "+": // (+ ...)
 				var total int64
 				for _, arg := range args {
@@ -180,7 +167,7 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 					rArgs[i] = reflect.New(expectedType).Elem()
 				}
 			} else {
-				rArgs[i] = reflect.ValueOf(arg)
+				rArgs[i] = reflect.ValueOf(evaluatedArg)
 			}
 		}
 
@@ -194,10 +181,81 @@ func (interp *Interpreter) evaluateNode(scope *Scope, v any) (r any, err error) 
 		if len(outputs) == 1 {
 			return outputs[0], nil
 		}
-		return List{outputs}, nil
+		return Apply{outputs}, nil
 
 	case Symbol:
 		return scope.Bindings[v.Name], nil
+
+	case List:
+		items := make([]any, len(v.Values))
+		for i, item := range v.Values {
+			eItem, err := interp.evaluateNode(scope, item)
+			if err != nil {
+				return nil, err
+			}
+
+			items[i] = eItem
+		}
+
+		return List{items}, nil
+
+	case Map:
+		items := make([]Apply, len(v.Entries))
+		for i, entry := range v.Entries {
+			k, v := entry.Values[0], entry.Values[1]
+
+			eKey, err := interp.evaluateNode(scope, k)
+			if err != nil {
+				return nil, err
+			}
+			eValue, err := interp.evaluateNode(scope, v)
+			if err != nil {
+				return nil, err
+			}
+
+			items[i] = Apply{[]any{eKey, eValue}}
+		}
+
+		return Map{items}, nil
+
+	case Drill:
+		value, err := interp.evaluateNode(scope, v.Chain[0])
+		if err != nil {
+			return nil, err
+		}
+
+		chain := v.Chain[1:]
+		for _, key := range chain {
+			switch a := value.(type) { // types that auto-skip ".Values" to access content
+			case Apply:
+				value = a.Values
+			case List:
+				value = a.Values
+			case Map:
+				value = a.Entries
+			}
+
+			switch k := key.(type) {
+			case Symbol:
+				val := reflect.ValueOf(value)
+				switch val.Kind() {
+				case reflect.Struct:
+					value = val.FieldByName(k.Name).Interface()
+				case reflect.Map:
+					value = val.MapIndex(reflect.ValueOf(k.Name)).Interface()
+				default:
+					return nil, fmt.Errorf(`cannot get "%s" from %v`, k.Name, value)
+				}
+			case string:
+				value = reflect.ValueOf(value).MapIndex(reflect.ValueOf(k)).Interface()
+			case int64:
+				value = reflect.ValueOf(value).Index(int(k)).Interface()
+			default:
+				return nil, fmt.Errorf(`cannot get %#v from %v`, key, value)
+			}
+		}
+
+		return value, nil
 
 	default:
 		return v, nil

@@ -61,7 +61,7 @@ var rules = []rule{
 	{Type: PunctuationToken,
 		Regex: regexp.MustCompile(`^[\#\$\.\(\)\[\]\{\}]`)},
 	{Type: WhitespaceToken, Ignore: true,
-		Regex: regexp.MustCompile(`^[ \t]+`)},
+		Regex: regexp.MustCompile(`^[ \t\n]+`)},
 	{Type: IdentifierToken,
 		Regex: regexp.MustCompile(`^[^\#\$\.\(\)\[\]\{\}\s]+`)},
 }

@@ -60,7 +60,7 @@ func (p *parser) parseProgram() (any, error) {
 		statements = append(statements, e)
 	}
 
-	return List{statements}, nil
+	return Apply{statements}, nil
 }
 
 func (p *parser) parseExpression() (any, error) {
@@ -73,7 +73,7 @@ func (p *parser) parseExpression() (any, error) {
 		return node, nil
 	}
 
-	chain := []any{Symbol{"get"}, node}
+	chain := []any{node}
 
 	for !p.done() && p.peek().Value == "." {
 		p.expectValue(".")
@@ -94,17 +94,23 @@ func (p *parser) parseExpression() (any, error) {
 		return nil, fmt.Errorf(`expected accessor but got %v`, p.peek().Type)
 	}
 
-	return List{chain}, nil
+	return Drill{chain}, nil
 }
 
 func (p *parser) parseValue() (any, error) {
-	if n, err := p.parseList(); err == nil {
-		return n, nil
-	}
 	if n, err := p.parseQuoted(); err == nil {
 		return n, nil
 	}
 	if n, err := p.parseUnquoted(); err == nil {
+		return n, nil
+	}
+	if n, err := p.parseFnCall(); err == nil {
+		return n, nil
+	}
+	if n, err := p.parseList(); err == nil {
+		return n, nil
+	}
+	if n, err := p.parseMap(); err == nil {
 		return n, nil
 	}
 	if n, err := p.parseIdentifier(); err == nil {
@@ -123,26 +129,67 @@ func (p *parser) parseValue() (any, error) {
 	return nil, fmt.Errorf(`expected value but got "%s"`, p.peek().Value)
 }
 
-func (p *parser) parseList() (any, error) {
-	if err := p.expectValue(`(`); err != nil {
+func (p *parser) parseFnCall() (any, error) {
+	args, err := parseItems(p, "(", ")", p.parseExpression)
+	if err != nil {
 		return nil, err
 	}
 
-	args := []any{}
-	for !p.done() && p.peek().Value != ")" {
-		arg, err := p.parseExpression()
+	return Apply{args}, nil
+}
+
+func (p *parser) parseList() (any, error) {
+	items, err := parseItems(p, "[", "]", p.parseExpression)
+	if err != nil {
+		return nil, err
+	}
+
+	return List{items}, nil
+}
+
+func (p *parser) parseMap() (any, error) {
+	entries, err := parseItems(p, "{", "}", func() (Apply, error) {
+		key, err := p.parseExpression()
+		if err != nil {
+			var zero Apply
+			return zero, err
+		}
+
+		value, err := p.parseExpression()
+		if err != nil {
+			var zero Apply
+			return zero, err
+		}
+
+		return Apply{[]any{key, value}}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return Map{entries}, nil
+}
+
+func parseItems[T any](p *parser, startToken, endToken string, itemParser func() (T, error)) ([]T, error) {
+	if err := p.expectValue(startToken); err != nil {
+		return nil, err
+	}
+
+	items := []T{}
+	for !p.done() && p.peek().Value != endToken {
+		item, err := itemParser()
 		if err != nil {
 			return nil, err
 		}
 
-		args = append(args, arg)
+		items = append(items, item)
 	}
 
-	if err := p.expectValue(`)`); err != nil {
+	if err := p.expectValue(endToken); err != nil {
 		return nil, err
 	}
 
-	return List{args}, nil
+	return items, nil
 }
 
 func (p *parser) parseQuoted() (any, error) {
@@ -168,7 +215,7 @@ func (p *parser) parseUnquoted() (any, error) {
 		return nil, err
 	}
 
-	return List{[]any{Symbol{"unquote"}, inner}}, nil
+	return Unquote{inner}, nil
 }
 
 func (p *parser) parseIdentifier() (any, error) {
