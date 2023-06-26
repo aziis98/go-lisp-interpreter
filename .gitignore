@@ -1,0 +1,11 @@
+# gitignore
+
+.env
+*.local*
+
+bin/
+.out/
+out/
+dist/
+
+.vscode/
