@@ -34,3 +34,5 @@ This language has the following features (those not checked are work in progress
         (div { #class "title" } $author.full-name)
         (div { #class "description" } $author.bio)  
     ```  
+
+- [ ] Lexical scoping (now there is no scoping yet)
