@@ -12,6 +12,10 @@ This language has the following features (those not checked are work in progress
 
 - [ ] Very easy interoperability from and with Golang
 
+    To call Go code from this lisp you can use `interp.Use(lisp.Symbols.All)` or `interp.Use(lisp.Symbols.Fmt)` that just adds those symbols to the root scope, those variables are just collections of stdlib functions exported as a map.
+
+    To mix lisp and Go code instead you can use `interp.EvalWithMap("(+ x 1)", lisp.ScopeMap{ "x": 1 })` that evaluates to `int64(2)`. Alternatively the method `Interpreter.EvalWithValues(string, any...)` just takes a series of values and binds them to `_0`, `_1` and so on. By the way these bindings don't override globals with the same name because new scope gets created.
+
 - [x] Lists with `[1 2 3]`
 
 - [x] Maps with `{ #name "John" #surname "Smith" }`
